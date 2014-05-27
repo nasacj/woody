@@ -1,5 +1,7 @@
 package xmpp.nasacj.learn;
 
+import org.xmlpull.v1.XmlPullParser;
+
 public class HelloMXParser
 {
 
@@ -8,7 +10,7 @@ public class HelloMXParser
 	 */
 	public static void main(String[] args)
 	{
-		// TODO Auto-generated method stub
+		System.out.println(XmlPullParser.START_TAG);
 
 	}
 
