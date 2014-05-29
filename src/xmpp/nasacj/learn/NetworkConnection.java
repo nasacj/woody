@@ -32,7 +32,7 @@ public class NetworkConnection
 	Thread readerThread;
 
 	private void connectUsingConfiguration(ConnectionConfiguration config)
-			throws IOException
+			throws IOException, InterruptedException
 	{
 		this.config = config;
 		String host = config.getHost();
@@ -89,6 +89,9 @@ public class NetworkConnection
 		stream.append(" version=\"1.0\">");
 		writer.write(stream.toString());
 		writer.flush();
+		
+		writer.write("<starttls xmlns=\"urn:ietf:params:xml:ns:xmpp-tls\"/>");
+		writer.flush();
 	}
 
 	public void initWriter()
@@ -113,7 +116,7 @@ public class NetworkConnection
 		};
 		// writerThread.setName("Smack Packet Writer (" + connection.connectionCounterValue + ")");
 		writerThread.setName("Smack Packet Writer");
-		writerThread.setDaemon(true);
+		//writerThread.setDaemon(true);
 
 	}
 	
@@ -136,31 +139,38 @@ public class NetworkConnection
 				{
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+				} catch (InterruptedException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
 				}
 			}
 		};
 		//readerThread.setName("Smack Packet Reader (" + connection.connectionCounterValue + ")");
 		readerThread.setName("Smack Packet Reader");
-		
-		readerThread.setDaemon(true);
+		//readerThread.setDaemon(true);
 	}
 	
-	public void parsePackets(Thread thread) throws IOException
+	public void parsePackets(Thread thread) throws IOException, InterruptedException
 	{
-		BufferedReader bufferedReader = (BufferedReader)reader;
+		//BufferedReader bufferedReader = (BufferedReader)reader;
 		while (true)
 		{
-			String lineString = bufferedReader.readLine();
-			System.out.println(lineString);
+			char[] char_buffer = new char[1];
+			reader.read(char_buffer);
+			//String lineString = bufferedReader.readLine();
+			System.out.print(char_buffer);
+			Thread.sleep(20);
 		}
 	}
 	
-	public void startup() {
+	public void startup() throws InterruptedException {
 		readerThread.start();
+		//Thread.sleep(1000);
         writerThread.start();
     }
 	
-	public void ExamTry(String serverName) throws IOException
+	public void ExamTry(String serverName) throws IOException, InterruptedException
 	{
 		ConnectionConfiguration configuration = new ConnectionConfiguration(serverName);
 		connectUsingConfiguration(configuration);
@@ -175,6 +185,6 @@ public class NetworkConnection
 	{
 		NetworkConnection networkConnection = new NetworkConnection();
 		networkConnection.ExamTry("jabber.org");
-		Thread.sleep(Long.MAX_VALUE);
+		//Thread.sleep(Long.MAX_VALUE);
 	}
 }
