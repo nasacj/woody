@@ -5,11 +5,25 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.PipedReader;
+import java.io.PipedWriter;
 import java.io.Reader;
+import java.io.StringBufferInputStream;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.KeyStore;
+
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.security.auth.callback.PasswordCallback;
+
+import org.xmlpull.mxp1.MXParser;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
 
 import xmpp.nasacj.woody.*;
 
@@ -28,11 +42,17 @@ public class NetworkConnection
 	 */
 	protected Writer writer;
 
+	protected XmlPullParser parser;
+
+	private PipedReader in;
+	private PipedWriter out;
+
 	Thread writerThread;
 	Thread readerThread;
+	Thread outputThread;
 
 	private void connectUsingConfiguration(ConnectionConfiguration config)
-			throws IOException, InterruptedException
+			throws IOException, InterruptedException, XmlPullParserException
 	{
 		this.config = config;
 		String host = config.getHost();
@@ -63,23 +83,43 @@ public class NetworkConnection
 			// throw new XMPPException(errorMessage, new XMPPError(
 			// XMPPError.Condition.remote_server_error, errorMessage), ioe);
 		}
-		
-		initConnection();
-		initReader();
-		initWriter();
+
+		initReaderAndWriter();
+		resetParser();
+		initReaderThread();
+		initWriterThread();
+		initOutPutThread();
 		startup();
 	}
 
-	private void initConnection() throws UnsupportedEncodingException,
-			IOException
+	private void resetParser() throws XmlPullParserException
+	{
+		parser = new MXParser();
+		parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true);
+		parser.setInput(in);
+	}
+
+	private void initReaderAndWriter() throws UnsupportedEncodingException,
+			IOException, XmlPullParserException
 	{
 		reader = new BufferedReader(new InputStreamReader(
 				socket.getInputStream(), "UTF-8"));
 		writer = new BufferedWriter(new OutputStreamWriter(
 				socket.getOutputStream(), "UTF-8"));
+
+		in = new PipedReader();
+		out = new PipedWriter(in);
+
 	}
 
-	private void openStream() throws IOException
+	private void askTLS() throws IOException, InterruptedException
+	{
+		Thread.sleep(500);
+		writer.write("<starttls xmlns=\"urn:ietf:params:xml:ns:xmpp-tls\"/>");
+		writer.flush();
+	}
+
+	private void openStream() throws IOException, InterruptedException
 	{
 		StringBuilder stream = new StringBuilder();
 		stream.append("<stream:stream");
@@ -89,12 +129,72 @@ public class NetworkConnection
 		stream.append(" version=\"1.0\">");
 		writer.write(stream.toString());
 		writer.flush();
-		
-		writer.write("<starttls xmlns=\"urn:ietf:params:xml:ns:xmpp-tls\"/>");
-		writer.flush();
+
 	}
 
-	public void initWriter()
+	void proceedTLSReceived() throws Exception
+	{
+		Socket plain = socket;
+		SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory
+				.getDefault();
+		// Secure the plain connection
+		socket = factory.createSocket(plain, plain.getInetAddress()
+				.getHostName(), plain.getPort(), true);
+		socket.setSoTimeout(0);
+		socket.setKeepAlive(true);
+
+		// SSLContext context = SSLContext.getInstance("TLS");
+		// KeyStore ks = null;
+		// KeyManager[] kms = null;
+		// PasswordCallback pcb = null;
+		//
+		// // Verify certificate presented by the server
+		// context.init(kms,
+		// new javax.net.ssl.TrustManager[]{new
+		// ServerTrustManager(config.getServiceName(), config)},
+		// new java.security.SecureRandom());
+		// Socket plain = socket;
+		// // Secure the plain connection
+		// socket = context.getSocketFactory().createSocket(plain,
+		// plain.getInetAddress().getHostName(), plain.getPort(), true);
+		// socket.setSoTimeout(0);
+		// socket.setKeepAlive(true);
+
+		// Initialize the reader and writer with the new secured version
+		initReaderAndWriter();
+		// Proceed to do the handshake
+		((SSLSocket) socket).startHandshake();
+
+		openStream();
+	}
+
+	public void initOutPutThread()
+	{
+		outputThread = new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					outputPureDatas(this);
+				} catch (IOException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (InterruptedException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		};
+		// writerThread.setName("Smack Packet Writer (" +
+		// connection.connectionCounterValue + ")");
+		writerThread.setName("Smack Out Put Thread");
+		writerThread.setDaemon(true);
+	}
+
+	public void initWriterThread()
 	{
 		writerThread = new Thread()
 		{
@@ -114,19 +214,36 @@ public class NetworkConnection
 				}
 			}
 		};
-		// writerThread.setName("Smack Packet Writer (" + connection.connectionCounterValue + ")");
+		// writerThread.setName("Smack Packet Writer (" +
+		// connection.connectionCounterValue + ")");
 		writerThread.setName("Smack Packet Writer");
-		//writerThread.setDaemon(true);
+		// writerThread.setDaemon(true);
 
 	}
-	
-	public void writePackets(Thread thread) throws IOException, InterruptedException
+
+	public void writePackets(Thread thread) throws IOException,
+			InterruptedException
 	{
 		openStream();
+		askTLS();
 		Thread.sleep(Long.MAX_VALUE);
 	}
 
-	public void initReader()
+	public void outputPureDatas(Thread thread) throws IOException,
+			InterruptedException
+	{
+		while (true)
+		{
+			char[] char_buffer = new char[10];
+			// char[] char_buffer2 = new char[1];
+			reader.read(char_buffer);
+			out.write(char_buffer);
+			System.out.print(char_buffer);
+			Thread.sleep(20);
+		}
+	}
+
+	public void initReaderThread()
 	{
 		readerThread = new Thread()
 		{
@@ -143,48 +260,83 @@ public class NetworkConnection
 				{
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+				} catch (XmlPullParserException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (Exception e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
 				}
 			}
 		};
-		//readerThread.setName("Smack Packet Reader (" + connection.connectionCounterValue + ")");
+		// readerThread.setName("Smack Packet Reader (" +
+		// connection.connectionCounterValue + ")");
 		readerThread.setName("Smack Packet Reader");
-		//readerThread.setDaemon(true);
+		// readerThread.setDaemon(true);
 	}
-	
-	public void parsePackets(Thread thread) throws IOException, InterruptedException
+
+	public void parsePackets(Thread thread) throws Exception
 	{
-		//BufferedReader bufferedReader = (BufferedReader)reader;
+		// BufferedReader bufferedReader = (BufferedReader)reader;
+		int eventType = parser.getEventType();
 		while (true)
 		{
-			char[] char_buffer = new char[1];
-			reader.read(char_buffer);
-			//String lineString = bufferedReader.readLine();
-			System.out.print(char_buffer);
-			Thread.sleep(20);
+			//Thread.sleep(500);
+			// char[] char_buffer = new char[10];
+			// //char[] char_buffer2 = new char[1];
+			// reader.read(char_buffer);
+			// out.write(char_buffer);
+			// System.out.print(char_buffer);
+
+			// in.read(char_buffer2);
+			// System.err.print(char_buffer);
+
+			if (eventType == XmlPullParser.START_TAG)
+			{
+				System.err.println(parser.getName());
+				if (parser.getName().equals("proceed"))
+				{
+					proceedTLSReceived();
+					resetParser();
+					openStream();
+				}
+			}
+
+			eventType = parser.next();
+			// System.out.println("next");
+
 		}
 	}
-	
-	public void startup() throws InterruptedException {
-		readerThread.start();
-		//Thread.sleep(1000);
-        writerThread.start();
-    }
-	
-	public void ExamTry(String serverName) throws IOException, InterruptedException
+
+	public void startup() throws InterruptedException
 	{
-		ConnectionConfiguration configuration = new ConnectionConfiguration(serverName);
+		readerThread.start();
+		// Thread.sleep(1000);
+		writerThread.start();
+		outputThread.start();
+	}
+
+	public void ExamTry(String serverName) throws IOException,
+			InterruptedException, XmlPullParserException
+	{
+		ConnectionConfiguration configuration = new ConnectionConfiguration(
+				serverName);
 		connectUsingConfiguration(configuration);
 	}
 
 	/**
 	 * @param args
-	 * @throws IOException 
-	 * @throws InterruptedException 
+	 * @throws IOException
+	 * @throws InterruptedException
+	 * @throws XmlPullParserException
 	 */
-	public static void main(String[] args) throws IOException, InterruptedException
+	public static void main(String[] args) throws IOException,
+			InterruptedException, XmlPullParserException
 	{
 		NetworkConnection networkConnection = new NetworkConnection();
 		networkConnection.ExamTry("jabber.org");
-		//Thread.sleep(Long.MAX_VALUE);
+		// Thread.sleep(Long.MAX_VALUE);
 	}
 }

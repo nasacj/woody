@@ -32,6 +32,7 @@ public class ParserLearn
 		{
 			if (eventType == XmlPullParser.START_TAG)
 			{
+				System.err.println(parser.getText());
 				if (parser.getName().equals("stream"))
 					System.err.println("Get stream");
 					
