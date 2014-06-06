@@ -8,7 +8,6 @@ import java.io.OutputStreamWriter;
 import java.io.PipedReader;
 import java.io.PipedWriter;
 import java.io.Reader;
-import java.io.StringBufferInputStream;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.net.Socket;
@@ -50,6 +49,7 @@ public class NetworkConnection
 	Thread writerThread;
 	Thread readerThread;
 	Thread outputThread;
+	private boolean isOutPutRunning;
 
 	private void connectUsingConfiguration(ConnectionConfiguration config)
 			throws IOException, InterruptedException, XmlPullParserException
@@ -85,18 +85,17 @@ public class NetworkConnection
 		}
 
 		initReaderAndWriter();
-		resetParser();
+		resetParser(reader);
 		initReaderThread();
 		initWriterThread();
-		initOutPutThread();
 		startup();
 	}
 
-	private void resetParser() throws XmlPullParserException
+	private void resetParser(Reader inReader) throws XmlPullParserException
 	{
 		parser = new MXParser();
 		parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true);
-		parser.setInput(in);
+		parser.setInput(inReader);
 	}
 
 	private void initReaderAndWriter() throws UnsupportedEncodingException,
@@ -134,42 +133,53 @@ public class NetworkConnection
 
 	void proceedTLSReceived() throws Exception
 	{
-		Socket plain = socket;
-		SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory
-				.getDefault();
-		// Secure the plain connection
-		socket = factory.createSocket(plain, plain.getInetAddress()
-				.getHostName(), plain.getPort(), true);
-		socket.setSoTimeout(0);
-		socket.setKeepAlive(true);
-
-		// SSLContext context = SSLContext.getInstance("TLS");
-		// KeyStore ks = null;
-		// KeyManager[] kms = null;
-		// PasswordCallback pcb = null;
-		//
-		// // Verify certificate presented by the server
-		// context.init(kms,
-		// new javax.net.ssl.TrustManager[]{new
-		// ServerTrustManager(config.getServiceName(), config)},
-		// new java.security.SecureRandom());
 		// Socket plain = socket;
+		// SSLSocketFactory factory = (SSLSocketFactory)
+		// SSLSocketFactory.getDefault();
 		// // Secure the plain connection
-		// socket = context.getSocketFactory().createSocket(plain,
+		// socket = factory.createSocket(plain,
 		// plain.getInetAddress().getHostName(), plain.getPort(), true);
 		// socket.setSoTimeout(0);
 		// socket.setKeepAlive(true);
 
+		SSLContext context = SSLContext.getInstance("TLS");
+		KeyStore ks = null;
+		KeyManager[] kms = null;
+		PasswordCallback pcb = null;
+
+		// Verify certificate presented by the server
+		context.init(kms, new javax.net.ssl.TrustManager[]
+		{ new ServerTrustManager(config.getServiceName(), config) },
+				new java.security.SecureRandom());
+		Socket plain = socket;
+		// Secure the plain connection
+		socket = context.getSocketFactory().createSocket(plain,
+				plain.getInetAddress().getHostName(), plain.getPort(), true);
+		socket.setSoTimeout(0);
+		socket.setKeepAlive(true);
+
 		// Initialize the reader and writer with the new secured version
+		// stopOutPutThread();
+		//outputThread.stop();
 		initReaderAndWriter();
 		// Proceed to do the handshake
+		System.err.println("Start Handshake!");
 		((SSLSocket) socket).startHandshake();
+		System.err.println("Handshake finish!");
 
 		openStream();
 	}
 
-	public void initOutPutThread()
+	public void stopOutPutThread() throws InterruptedException
 	{
+		isOutPutRunning = false;
+		Thread.sleep(2000);
+	}
+
+	public void restartOutPutThread() throws InterruptedException
+	{
+		isOutPutRunning = false;
+		Thread.sleep(5000);
 		outputThread = new Thread()
 		{
 			public void run()
@@ -190,8 +200,38 @@ public class NetworkConnection
 		};
 		// writerThread.setName("Smack Packet Writer (" +
 		// connection.connectionCounterValue + ")");
-		writerThread.setName("Smack Out Put Thread");
-		writerThread.setDaemon(true);
+		outputThread.setName("Smack Out Put Thread");
+		outputThread.setDaemon(true);
+		isOutPutRunning = true;
+		outputThread.start();
+	}
+
+	public void startOutPutThread()
+	{
+		isOutPutRunning = true;
+		outputThread = new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					outputPureDatas(this);
+				} catch (IOException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (InterruptedException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		};
+		// writerThread.setName("Smack Packet Writer (" +
+		// connection.connectionCounterValue + ")");
+		outputThread.setName("Smack Out Put Thread");
+		outputThread.setDaemon(true);
+		outputThread.start();
 	}
 
 	public void initWriterThread()
@@ -232,15 +272,16 @@ public class NetworkConnection
 	public void outputPureDatas(Thread thread) throws IOException,
 			InterruptedException
 	{
-		while (true)
+		System.err.println("OutPut Thread start...");
+		while (isOutPutRunning)
 		{
-			char[] char_buffer = new char[10];
-			// char[] char_buffer2 = new char[1];
+			char[] char_buffer = new char[1];
 			reader.read(char_buffer);
 			out.write(char_buffer);
 			System.out.print(char_buffer);
-			Thread.sleep(20);
+			// Thread.sleep(20);
 		}
+		System.err.println("OutPut Thread finish...");
 	}
 
 	public void initReaderThread()
@@ -283,27 +324,18 @@ public class NetworkConnection
 		int eventType = parser.getEventType();
 		while (true)
 		{
-			//Thread.sleep(500);
-			// char[] char_buffer = new char[10];
-			// //char[] char_buffer2 = new char[1];
-			// reader.read(char_buffer);
-			// out.write(char_buffer);
-			// System.out.print(char_buffer);
-
-			// in.read(char_buffer2);
-			// System.err.print(char_buffer);
-
+			// Thread.sleep(500);
 			if (eventType == XmlPullParser.START_TAG)
 			{
 				System.err.println(parser.getName());
 				if (parser.getName().equals("proceed"))
 				{
+					stopOutPutThread();
 					proceedTLSReceived();
-					resetParser();
-					openStream();
+					resetParser(in);
+					startOutPutThread();
 				}
 			}
-
 			eventType = parser.next();
 			// System.out.println("next");
 
@@ -315,7 +347,7 @@ public class NetworkConnection
 		readerThread.start();
 		// Thread.sleep(1000);
 		writerThread.start();
-		outputThread.start();
+		//outputThread.start();
 	}
 
 	public void ExamTry(String serverName) throws IOException,
